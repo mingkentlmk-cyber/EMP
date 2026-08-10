@@ -131,6 +131,93 @@ body.batch-production-open{overflow:hidden!important}
   -webkit-font-smoothing:antialiased;
 }
 </style>
+
+<style id="desktop-stable-two-column-v1">
+/* Desktop only: one stable two-column editor. Mobile rules remain untouched. */
+@media (min-width:901px){
+  html,body{width:100%!important;height:100%!important;min-height:100%!important;overflow:hidden!important}
+  body{padding:4px!important}
+
+  .workspace,
+  .workspace.layout-bottom{
+    width:calc(100vw - 8px)!important;
+    max-width:none!important;
+    height:calc(100dvh - 8px)!important;
+    min-height:0!important;
+    margin:0!important;
+    display:grid!important;
+    grid-template-columns:minmax(0,1fr) clamp(300px,24vw,360px)!important;
+    grid-template-rows:minmax(0,1fr)!important;
+    gap:6px!important;
+    align-items:stretch!important;
+    justify-content:stretch!important;
+    overflow:hidden!important;
+  }
+
+  .workspace .canvas-container,
+  .workspace.layout-bottom .canvas-container{
+    grid-column:1!important;
+    grid-row:1!important;
+    width:100%!important;
+    max-width:none!important;
+    height:100%!important;
+    min-width:0!important;
+    min-height:0!important;
+    margin:0!important;
+    padding:8px!important;
+    display:flex!important;
+    align-items:center!important;
+    justify-content:center!important;
+    overflow:hidden!important;
+    box-sizing:border-box!important;
+  }
+
+  .workspace .controls-panel,
+  .workspace.layout-bottom .controls-panel{
+    grid-column:2!important;
+    grid-row:1!important;
+    width:100%!important;
+    max-width:none!important;
+    height:100%!important;
+    max-height:none!important;
+    min-width:0!important;
+    min-height:0!important;
+    margin:0!important;
+    padding:6px!important;
+    overflow-y:auto!important;
+    overflow-x:hidden!important;
+    box-sizing:border-box!important;
+    scrollbar-gutter:stable!important;
+  }
+
+  /* toolbar is moved into sidePanel on desktop */
+  #sidePanel > .toolbar{
+    position:relative!important;
+    z-index:4!important;
+    width:100%!important;
+    max-width:none!important;
+    margin:0 0 6px!important;
+    padding:5px!important;
+    flex:none!important;
+  }
+  #sidePanel > .toolbar .toolbar-row{grid-template-columns:1fr!important;gap:4px!important;margin-bottom:4px!important}
+  #sidePanel > .toolbar .toolbar-group{grid-template-columns:32px repeat(2,minmax(0,1fr))!important;width:100%!important}
+
+  #mainCanvas{
+    display:block!important;
+    flex:0 0 auto!important;
+    max-width:none!important;
+    max-height:none!important;
+    width:var(--editor-canvas-css-w,auto)!important;
+    height:var(--editor-canvas-css-h,auto)!important;
+    object-fit:contain!important;
+  }
+
+  /* Desktop layout is intentionally fixed; VIEW/LAY is not needed here. */
+  #sidePanel > .toolbar button[onclick="toggleLayout()"]{display:none!important}
+}
+</style>
+
 </head>
 <body>
 <canvas id="cosmicBg" aria-hidden="true"></canvas>
@@ -378,7 +465,7 @@ body.batch-production-open{overflow:hidden!important}
       <div class="batch-template-grid">
         <button class="batch-template-card" type="button" onclick="selectBatchTemplate('emp')">
           <span class="batch-template-code">EMP</span>
-          <span class="batch-template-desc">日期与时间合并 · MYR 金额格式</span>
+          <span class="batch-template-desc">批量交替输出 · CE 中英文 → M 马来文 → CE → M</span>
         </button>
         <button class="batch-template-card" type="button" onclick="selectBatchTemplate('empx')">
           <span class="batch-template-code">EMPX</span>
@@ -2284,6 +2371,12 @@ function hideUploadPanel(){document.getElementById('uploadPanel').classList.remo
 function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+type;setTimeout(()=>t.classList.remove('show'),2000);}
 function toggleLayout(){
 const ws=document.getElementById('workspace');
+if(window.matchMedia&&window.matchMedia('(min-width:901px)').matches){
+  layoutMode='side';
+  ws.classList.remove('layout-bottom');
+  scheduleCrossDeviceCanvasPreview();
+  return;
+}
 if(layoutMode==='side'){
 layoutMode='bottom';
 ws.classList.add('layout-bottom');
@@ -2292,6 +2385,7 @@ layoutMode='side';
 ws.classList.remove('layout-bottom');
 }
 showToast(layoutMode==='bottom'?'已切换到底部模式':'已切换到侧边模式');
+scheduleCrossDeviceCanvasPreview();
 }
 async function batchGenerate(){
 const start=new Date(document.getElementById('batchStartDate').value);
@@ -2507,21 +2601,27 @@ function syncCrossDeviceCanvasPreview(){
   const fullscreen=document.body.classList.contains('preview-fullscreen-open');
   const mobile=!!(window.matchMedia&&window.matchMedia('(max-width:900px)').matches);
   const viewportW=Math.max(1,document.documentElement.clientWidth||window.innerWidth||canvasConfig.width);
+  const viewportH=Math.max(1,(window.visualViewport&&window.visualViewport.height)||document.documentElement.clientHeight||window.innerHeight||canvasConfig.height);
   const hs=getComputedStyle(holder);
   const padX=(parseFloat(hs.paddingLeft)||0)+(parseFloat(hs.paddingRight)||0);
+  const padY=(parseFloat(hs.paddingTop)||0)+(parseFloat(hs.paddingBottom)||0);
 
-  // Lock preview scale to width only. Browser bars / visible-height changes must never resize or shift it.
   let targetW;
+  let targetH=Infinity;
   if(fullscreen){
     targetW=viewportW;
+    targetH=viewportH;
   }else if(mobile){
-    // Normal mobile preview: lock to 60% viewport width (20% breathing room on each side).
+    // Keep the existing mobile behavior exactly: width-driven preview.
     targetW=Math.max(120,viewportW*0.60);
   }else{
-    targetW=Math.max(120,Math.min(holder.clientWidth-padX,600));
+    // Desktop: fit BOTH available width and available height. This prevents cropping
+    // or aspect-ratio distortion while Chrome is resized in any direction.
+    targetW=Math.max(1,holder.clientWidth-padX);
+    targetH=Math.max(1,holder.clientHeight-padY);
   }
 
-  let scale=Math.min(targetW/canvasConfig.width,1);
+  let scale=Math.min(targetW/canvasConfig.width,targetH/canvasConfig.height,1);
   if(!Number.isFinite(scale)||scale<=0)scale=1;
   const dpr=Math.max(1,window.devicePixelRatio||1);
   scale=Math.max(1/(canvasConfig.width*dpr),Math.floor(scale*dpr*10000)/(dpr*10000));
@@ -4640,7 +4740,7 @@ window.addEventListener('keydown',e=>{if(!editor.classList.contains('show'))retu
 
 <script id="batch-production-modal-script">
 (function(){
-  const BATCH_PROJECTS={"emp":{"version":"1.5-three-template-png-effects","templateMode":"empire","canvas":{"width":720,"height":1280},"preset":[{"type":"text","fontSize":48,"color":"#FFFFFF","align":"left","x":150,"y":1098,"rotation":0,"opacity":1,"stylePreset":"normal","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"日期","gradientColor1":"#9b9b9b","gradientColor2":"#9b9b9b","gradientColor3":"#9b9b9b","gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":0,"shadowColor":"#000000","glowBlur":0,"glowColor":"#FFFFFF","strokeColor1":"#000000","strokeWidth1":0,"strokeColor2":"#000000","strokeWidth2":0,"extrudeDepth":0,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":0.48,"cache":null},{"type":"text","fontSize":48,"color":"#FFFFFF","align":"right","x":687,"y":1098,"rotation":0,"opacity":1,"stylePreset":"normal","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"金额","gradientColor1":"#37bf72","gradientColor2":"#37bf73","gradientColor3":"#39bf74","gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":0,"shadowColor":"#000000","glowBlur":0,"glowColor":"#FFFFFF","strokeColor1":"#000000","strokeWidth1":0,"strokeColor2":"#000000","strokeWidth2":0,"extrudeDepth":0,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":0.48,"isPreset":false},{"type":"text","fontSize":60,"color":"#FFFFFF","align":"right","x":693.9969834087481,"y":943,"rotation":0,"opacity":1,"stylePreset":"normal","fontPreset":"condensed","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"主金额","gradientColor1":"#86874f","gradientColor2":"#feffe0","gradientColor3":"#858351","gradientAngle":90,"gradientSize":6,"gradientX":0,"gradientY":-11,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":15,"shadowColor":"#000000","glowBlur":16,"glowColor":"#ffd700","strokeColor1":"#f5f299","strokeWidth1":2,"strokeColor2":"#54522c","strokeWidth2":6,"extrudeDepth":3,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#a95000","bevelLight":1,"bevelDark":1,"locked":true,"visible":true,"extrudeStrokeColor1":"#eff594","extrudeStrokeWidth1":2,"extrudeStrokeColor2":"#0c0c08","extrudeStrokeWidth2":6,"scale":1.5}],"template":[]},"empx":{"version":"1.5-three-template-png-effects","templateMode":"custom","canvas":{"width":600,"height":800},"preset":[{"type":"text","name":"标题","x":582.99,"y":550.65,"scale":1.35,"rotation":0,"opacity":1,"fontSize":48,"align":"right","color":"#D4AF37","stylePreset":"gold_basic","gradientColor1":"#5A3A00","gradientColor2":"#FFF8DC","gradientColor3":null,"gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":2,"shadowOffsetY":2,"shadowSize":5,"shadowSpread":8,"shadowColor":"#000000","glowBlur":20,"glowColor":"rgba(255,215,0,0.6)","strokeColor1":"#FFD700","strokeWidth1":3,"strokeColor2":"#8B6914","strokeWidth2":6,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0},{"type":"text","name":"日期","x":77.6,"y":635.06,"scale":0.46,"rotation":0,"opacity":1,"fontSize":48,"align":"center","color":"#D4AF37","stylePreset":"normal","gradientColor1":"#ffffff","gradientColor2":"#ffffff","gradientColor3":"#ffffff","gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":0,"shadowColor":"#000000","glowBlur":0,"glowColor":"#FFD700","strokeColor1":"#000000","strokeWidth1":0,"strokeColor2":"#000000","strokeWidth2":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0},{"type":"text","name":"时间","x":75.97,"y":657.79,"scale":0.4,"rotation":0,"opacity":1,"fontSize":48,"align":"center","color":"#D4AF37","stylePreset":"normal","gradientColor1":"#ffffff","gradientColor2":"#ffffff","gradientColor3":"#ffffff","gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":0,"shadowColor":"#000000","glowBlur":0,"glowColor":"#FFD700","strokeColor1":"#000000","strokeWidth1":0,"strokeColor2":"#000000","strokeWidth2":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0},{"type":"text","name":"金额","x":394.16,"y":644.81,"scale":0.46,"rotation":0,"opacity":1,"fontSize":48,"align":"center","color":"#D4AF37","stylePreset":"normal","gradientColor1":"#ffffff","gradientColor2":"#ffffff","gradientColor3":"#ffffff","gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":0,"shadowColor":"#000000","glowBlur":0,"glowColor":"#FFD700","strokeColor1":"#000000","strokeWidth1":0,"strokeColor2":"#000000","strokeWidth2":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0}],"template":[]}};
+  const BATCH_PROJECTS={"emp":{"version":"1.5-three-template-png-effects","templateMode":"empire","canvas":{"width":720,"height":1280},"preset":[{"type":"text","fontSize":48,"color":"#FFFFFF","align":"left","x":150,"y":1098,"rotation":0,"opacity":1,"stylePreset":"normal","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"日期","gradientColor1":"#9b9b9b","gradientColor2":"#9b9b9b","gradientColor3":"#9b9b9b","gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":0,"shadowColor":"#000000","glowBlur":0,"glowColor":"#FFFFFF","strokeColor1":"#000000","strokeWidth1":0,"strokeColor2":"#000000","strokeWidth2":0,"extrudeDepth":0,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":0.48,"isPreset":true},{"type":"text","fontSize":48,"color":"#FFFFFF","align":"right","x":687,"y":1098,"rotation":0,"opacity":1,"stylePreset":"normal","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"金额","gradientColor1":"#37bf72","gradientColor2":"#37bf73","gradientColor3":"#39bf74","gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":0,"shadowColor":"#000000","glowBlur":0,"glowColor":"#FFFFFF","strokeColor1":"#000000","strokeWidth1":0,"strokeColor2":"#000000","strokeWidth2":0,"extrudeDepth":0,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":0.48,"isPreset":true},{"type":"text","fontSize":60,"color":"#FFFFFF","align":"right","x":693.9969834087481,"y":939,"rotation":0,"opacity":1,"stylePreset":"gold_basic","fontPreset":"condensed","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"主金额","gradientColor1":"#86874f","gradientColor2":"#feffe0","gradientColor3":"#858351","gradientAngle":90,"gradientSize":5,"gradientX":0,"gradientY":-12,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":16,"shadowColor":"#000000","glowBlur":16,"glowColor":"rgba(255,215,0,0.6)","strokeColor1":"#f5f299","strokeWidth1":3,"strokeColor2":"#54522c","strokeWidth2":8,"extrudeDepth":5,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#a95000","bevelLight":1,"bevelDark":1,"locked":true,"visible":true,"extrudeStrokeColor1":"#eff594","extrudeStrokeWidth1":3,"extrudeStrokeColor2":"#0c0c08","extrudeStrokeWidth2":8,"scale":1.5,"isPreset":true}],"template":[{"type":"text","text":"Win Announcement","fontSize":42,"color":"#FFFFFF","align":"center","x":136.45701357466064,"y":971.0693815987934,"rotation":0,"opacity":1,"stylePreset":"white_glass","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"标题","gradientColor1":"#757575","gradientColor2":"#F5F5F5","gradientColor3":null,"gradientAngle":0,"gradientSize":80,"gradientX":0,"gradientY":0,"shadowOffsetX":2,"shadowOffsetY":2,"shadowSize":4,"shadowSpread":6,"shadowColor":"#000000","glowBlur":15,"glowColor":"rgba(255,255,255,0.4)","strokeColor1":"#000000","strokeWidth1":5,"strokeColor2":"#9E9E9E","strokeWidth2":7,"extrudeDepth":3,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":0.54},{"type":"text","text":"玩家报喜","fontSize":42,"color":"#FFFFFF","align":"center","x":139.90950226244343,"y":919,"rotation":0,"opacity":1,"stylePreset":"red_fire","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"标题","gradientColor1":"#5A1A00","gradientColor2":"#FF6B35","gradientColor3":null,"gradientAngle":90,"gradientSize":17,"gradientX":0,"gradientY":0,"shadowOffsetX":2,"shadowOffsetY":2,"shadowSize":4,"shadowSpread":6,"shadowColor":"#000000","glowBlur":20,"glowColor":"rgba(255,80,0,0.6)","strokeColor1":"#620900","strokeWidth1":3,"strokeColor2":"#eb2b00","strokeWidth2":6,"extrudeDepth":5,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":1.39},{"type":"text","text":"Dah Masuk","fontSize":42,"color":"#FFFFFF","align":"center","x":136.45701357466064,"y":962,"rotation":0,"opacity":1,"stylePreset":"white_glass","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"标题","gradientColor1":"#757575","gradientColor2":"#F5F5F5","gradientColor3":null,"gradientAngle":0,"gradientSize":80,"gradientX":0,"gradientY":0,"shadowOffsetX":2,"shadowOffsetY":2,"shadowSize":4,"shadowSpread":6,"shadowColor":"#000000","glowBlur":15,"glowColor":"rgba(255,255,255,0.4)","strokeColor1":"#000000","strokeWidth1":5,"strokeColor2":"#9E9E9E","strokeWidth2":7,"extrudeDepth":3,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":false,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":0.96,"isPreset":false},{"type":"text","text":"MENANG","fontSize":42,"color":"#FFFFFF","align":"center","x":139.90950226244343,"y":909,"rotation":0,"opacity":1,"stylePreset":"red_fire","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"标题","gradientColor1":"#5A1A00","gradientColor2":"#FF6B35","gradientColor3":null,"gradientAngle":90,"gradientSize":17,"gradientX":0,"gradientY":0,"shadowOffsetX":2,"shadowOffsetY":2,"shadowSize":4,"shadowSpread":6,"shadowColor":"#000000","glowBlur":20,"glowColor":"rgba(255,80,0,0.6)","strokeColor1":"#620900","strokeWidth1":3,"strokeColor2":"#eb2b00","strokeWidth2":6,"extrudeDepth":5,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":false,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":1.26,"isPreset":false}]},"empx":{"version":"1.5-three-template-png-effects","templateMode":"custom","canvas":{"width":600,"height":800},"preset":[{"type":"text","name":"标题","x":582.99,"y":550.65,"scale":1.35,"rotation":0,"opacity":1,"fontSize":48,"align":"right","color":"#D4AF37","stylePreset":"gold_basic","gradientColor1":"#5A3A00","gradientColor2":"#FFF8DC","gradientColor3":null,"gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":2,"shadowOffsetY":2,"shadowSize":5,"shadowSpread":8,"shadowColor":"#000000","glowBlur":20,"glowColor":"rgba(255,215,0,0.6)","strokeColor1":"#FFD700","strokeWidth1":3,"strokeColor2":"#8B6914","strokeWidth2":6,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0},{"type":"text","name":"日期","x":77.6,"y":635.06,"scale":0.46,"rotation":0,"opacity":1,"fontSize":48,"align":"center","color":"#D4AF37","stylePreset":"normal","gradientColor1":"#ffffff","gradientColor2":"#ffffff","gradientColor3":"#ffffff","gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":0,"shadowColor":"#000000","glowBlur":0,"glowColor":"#FFD700","strokeColor1":"#000000","strokeWidth1":0,"strokeColor2":"#000000","strokeWidth2":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0},{"type":"text","name":"时间","x":75.97,"y":657.79,"scale":0.4,"rotation":0,"opacity":1,"fontSize":48,"align":"center","color":"#D4AF37","stylePreset":"normal","gradientColor1":"#ffffff","gradientColor2":"#ffffff","gradientColor3":"#ffffff","gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":0,"shadowColor":"#000000","glowBlur":0,"glowColor":"#FFD700","strokeColor1":"#000000","strokeWidth1":0,"strokeColor2":"#000000","strokeWidth2":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0},{"type":"text","name":"金额","x":394.16,"y":644.81,"scale":0.46,"rotation":0,"opacity":1,"fontSize":48,"align":"center","color":"#D4AF37","stylePreset":"normal","gradientColor1":"#ffffff","gradientColor2":"#ffffff","gradientColor3":"#ffffff","gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":0,"shadowColor":"#000000","glowBlur":0,"glowColor":"#FFD700","strokeColor1":"#000000","strokeWidth1":0,"strokeColor2":"#000000","strokeWidth2":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0}],"template":[]},"emp_m":{"version":"1.5-three-template-png-effects","templateMode":"empire","canvas":{"width":720,"height":1280},"preset":[{"type":"text","fontSize":48,"color":"#FFFFFF","align":"left","x":150,"y":1098,"rotation":0,"opacity":1,"stylePreset":"normal","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"日期","gradientColor1":"#9b9b9b","gradientColor2":"#9b9b9b","gradientColor3":"#9b9b9b","gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":0,"shadowColor":"#000000","glowBlur":0,"glowColor":"#FFFFFF","strokeColor1":"#000000","strokeWidth1":0,"strokeColor2":"#000000","strokeWidth2":0,"extrudeDepth":0,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":0.48,"isPreset":true},{"type":"text","fontSize":48,"color":"#FFFFFF","align":"right","x":687,"y":1098,"rotation":0,"opacity":1,"stylePreset":"normal","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"金额","gradientColor1":"#37bf72","gradientColor2":"#37bf73","gradientColor3":"#39bf74","gradientAngle":0,"gradientSize":100,"gradientX":0,"gradientY":0,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":0,"shadowColor":"#000000","glowBlur":0,"glowColor":"#FFFFFF","strokeColor1":"#000000","strokeWidth1":0,"strokeColor2":"#000000","strokeWidth2":0,"extrudeDepth":0,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":0.48,"isPreset":true},{"type":"text","fontSize":60,"color":"#FFFFFF","align":"right","x":693.9969834087481,"y":939,"rotation":0,"opacity":1,"stylePreset":"gold_basic","fontPreset":"condensed","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"主金额","gradientColor1":"#86874f","gradientColor2":"#feffe0","gradientColor3":"#858351","gradientAngle":90,"gradientSize":5,"gradientX":0,"gradientY":-12,"shadowOffsetX":0,"shadowOffsetY":0,"shadowSize":0,"shadowSpread":16,"shadowColor":"#000000","glowBlur":16,"glowColor":"rgba(255,215,0,0.6)","strokeColor1":"#f5f299","strokeWidth1":3,"strokeColor2":"#54522c","strokeWidth2":8,"extrudeDepth":5,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#a95000","bevelLight":1,"bevelDark":1,"locked":true,"visible":true,"extrudeStrokeColor1":"#eff594","extrudeStrokeWidth1":3,"extrudeStrokeColor2":"#0c0c08","extrudeStrokeWidth2":8,"scale":1.5,"isPreset":true}],"template":[{"type":"text","text":"Win Announcement","fontSize":42,"color":"#FFFFFF","align":"center","x":136.45701357466064,"y":971.0693815987934,"rotation":0,"opacity":1,"stylePreset":"white_glass","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"标题","gradientColor1":"#757575","gradientColor2":"#F5F5F5","gradientColor3":null,"gradientAngle":0,"gradientSize":80,"gradientX":0,"gradientY":0,"shadowOffsetX":2,"shadowOffsetY":2,"shadowSize":4,"shadowSpread":6,"shadowColor":"#000000","glowBlur":15,"glowColor":"rgba(255,255,255,0.4)","strokeColor1":"#000000","strokeWidth1":5,"strokeColor2":"#9E9E9E","strokeWidth2":7,"extrudeDepth":3,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":false,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":0.54},{"type":"text","text":"玩家报喜","fontSize":42,"color":"#FFFFFF","align":"center","x":139.90950226244343,"y":919,"rotation":0,"opacity":1,"stylePreset":"red_fire","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"标题","gradientColor1":"#5A1A00","gradientColor2":"#FF6B35","gradientColor3":null,"gradientAngle":90,"gradientSize":17,"gradientX":0,"gradientY":0,"shadowOffsetX":2,"shadowOffsetY":2,"shadowSize":4,"shadowSpread":6,"shadowColor":"#000000","glowBlur":20,"glowColor":"rgba(255,80,0,0.6)","strokeColor1":"#620900","strokeWidth1":3,"strokeColor2":"#eb2b00","strokeWidth2":6,"extrudeDepth":5,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":false,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":1.39},{"type":"text","text":"Dah Masuk","fontSize":42,"color":"#FFFFFF","align":"center","x":136.45701357466064,"y":962,"rotation":0,"opacity":1,"stylePreset":"white_glass","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"标题","gradientColor1":"#757575","gradientColor2":"#F5F5F5","gradientColor3":null,"gradientAngle":0,"gradientSize":80,"gradientX":0,"gradientY":0,"shadowOffsetX":2,"shadowOffsetY":2,"shadowSize":4,"shadowSpread":6,"shadowColor":"#000000","glowBlur":15,"glowColor":"rgba(255,255,255,0.4)","strokeColor1":"#000000","strokeWidth1":5,"strokeColor2":"#9E9E9E","strokeWidth2":7,"extrudeDepth":3,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":0.96,"isPreset":false},{"type":"text","text":"MENANG","fontSize":42,"color":"#FFFFFF","align":"center","x":139.90950226244343,"y":909,"rotation":0,"opacity":1,"stylePreset":"red_fire","fontPreset":"bold_cn","fontFamily":"'Noto Sans SC','Microsoft YaHei',Arial,sans-serif","fontWeight":"900","name":"标题","gradientColor1":"#5A1A00","gradientColor2":"#FF6B35","gradientColor3":null,"gradientAngle":90,"gradientSize":17,"gradientX":0,"gradientY":0,"shadowOffsetX":2,"shadowOffsetY":2,"shadowSize":4,"shadowSpread":6,"shadowColor":"#000000","glowBlur":20,"glowColor":"rgba(255,80,0,0.6)","strokeColor1":"#620900","strokeWidth1":3,"strokeColor2":"#eb2b00","strokeWidth2":6,"extrudeDepth":5,"extrudeStepX":0,"extrudeStepY":0,"extrudeColor1":"#000000","extrudeColor2":"#000000","bevelLight":0,"bevelDark":0,"locked":true,"visible":true,"extrudeStrokeColor1":"#000000","extrudeStrokeWidth1":0,"extrudeStrokeColor2":"#ffffff","extrudeStrokeWidth2":0,"scale":1.26,"isPreset":false}]}};
   let selectedBatchTemplate='';
 
   function batchProjectLabel(key){return key==='empx'?'EMPX':'EMP';}
@@ -4704,21 +4804,30 @@ window.addEventListener('keydown',e=>{if(!editor.classList.contains('show'))retu
       showBatchTemplateChooser();
       return;
     }
+
     const startInput=document.getElementById('batchStartDate');
     const endInput=document.getElementById('batchEndDate');
     const countInput=document.getElementById('batchCount');
     const start=new Date((startInput&&startInput.value)||'');
     const end=new Date((endInput&&endInput.value)||'');
     const count=Math.max(1,Math.min(100,parseInt(countInput&&countInput.value,10)||1));
-    if(isNaN(start.getTime())||isNaN(end.getTime())){showToast('请选择日期','error');return;}
-    if(start>end){showToast('START日期不能晚于END日期','error');return;}
 
-    const project=BATCH_PROJECTS[selectedBatchTemplate];
-    const projectCanvas=project.canvas||{width:600,height:800};
+    if(isNaN(start.getTime())||isNaN(end.getTime())){
+      showToast('请选择日期','error');
+      return;
+    }
+    if(start>end){
+      showToast('START日期不能晚于END日期','error');
+      return;
+    }
+
+    const firstProject=selectedBatchTemplate==='emp' ? BATCH_PROJECTS.emp : BATCH_PROJECTS.empx;
+    const projectCanvas=firstProject.canvas||{width:600,height:800};
     const zip=new JSZip();
     const overlay=document.getElementById('loadingOverlay');
     const progressEl=document.getElementById('loadingProgress');
     const runBtn=document.getElementById('batchGenerateBtn');
+
     const backup={
       template:templateElements,
       preset:presetElements,
@@ -4728,67 +4837,112 @@ window.addEventListener('keydown',e=>{if(!editor.classList.contains('show'))retu
       selectedType:selectedType,
       selectedIndex:selectedIndex
     };
+
     if(runBtn)runBtn.disabled=true;
-    // Pause the normal preview renderer while batch PNGs are being captured.
-    // Otherwise renderLoop() can repaint the main canvas with the opaque preview background
-    // between render(true) and canvas.toBlob(), causing intermittent non-transparent files.
     window.__batchExportInProgress=true;
     isDirty=false;
     closeBatchProduction();
     if(overlay)overlay.classList.add('show');
+
     let current=new Date(start);
     let totalGenerated=0;
+    let empSequenceIndex=0;
+
     try{
       setCanvasSize(projectCanvas.width||600,projectCanvas.height||800);
-      // setCanvasSize marks the preview dirty; cancel that pending opaque repaint during export.
       isDirty=false;
-      templateElements=[];
-      selectedType='';selectedIndex=-1;
+      selectedType='';
+      selectedIndex=-1;
+
       while(current<=end){
         const dailyTimes=getBalancedDailyTimes(count);
+
         for(let i=0;i<count;i++){
+          // Every output gets its own time and amount.
           const amount=getRandomAmount();
           const timeStr=dailyTimes[i]||getRandomTime24();
+
+          let project;
+          let langCode;
+
+          if(selectedBatchTemplate==='emp'){
+            // Strict alternating order across the entire batch:
+            // CE, M, CE, M, CE, M...
+            const useCE=(empSequenceIndex%2===0);
+            project=useCE ? BATCH_PROJECTS.emp : BATCH_PROJECTS.emp_m;
+            langCode=useCE ? 'CE' : 'M';
+            empSequenceIndex++;
+          }else{
+            project=BATCH_PROJECTS.empx;
+            langCode='EMPX';
+          }
+
+          const size=project.canvas||projectCanvas;
+          if(canvasConfig.width!==size.width||canvasConfig.height!==size.height){
+            setCanvasSize(size.width||600,size.height||800);
+            isDirty=false;
+          }
+
+          currentTemplateMode=project.templateMode||'empire';
+          templateElements=JSON.parse(JSON.stringify(Array.isArray(project.template)?project.template:[]));
           presetElements=makeBatchPreset(project,current,timeStr,amount);
-          // Force a clean transparent frame and keep the realtime preview loop paused until toBlob finishes.
+
           isDirty=false;
           ctx.globalCompositeOperation='source-over';
           ctx.globalAlpha=1;
           render(true);
-          const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('PNG生成失败')),'image/png'));
+
+          const blob=await new Promise((resolve,reject)=>
+            canvas.toBlob(b=>b?resolve(b):reject(new Error('PNG生成失败')),'image/png')
+          );
+
           const safeDate=current.toISOString().slice(0,10);
           const safeTime=timeStr.replace(/:/g,'-');
           const safeAmount=String(amount).replace(/[^0-9]/g,'');
-          zip.file(batchProjectLabel(selectedBatchTemplate)+'_'+safeDate+'_'+safeTime+'_'+safeAmount+'.png',blob);
+          const filename=selectedBatchTemplate==='emp'
+            ? `EMP_${String(totalGenerated+1).padStart(3,'0')}_${langCode}_${safeDate}_${safeTime}_${safeAmount}.png`
+            : `EMPX_${String(totalGenerated+1).padStart(3,'0')}_${safeDate}_${safeTime}_${safeAmount}.png`;
+
+          zip.file(filename,blob);
           totalGenerated++;
-          if(progressEl)progressEl.textContent=batchProjectLabel(selectedBatchTemplate)+' · '+totalGenerated+' 张已生成 (ALPHAPNG)';
+
+          if(progressEl){
+            progressEl.textContent=selectedBatchTemplate==='emp'
+              ? `EMP · ${langCode} · ${totalGenerated} 张已生成`
+              : `EMPX · ${totalGenerated} 张已生成`;
+          }
         }
+
         current.setDate(current.getDate()+1);
       }
+
       if(progressEl)progressEl.textContent='正在打包...';
       const content=await zip.generateAsync({type:'blob'});
       const a=document.createElement('a');
-      const url=URL.createObjectURL(content);
-      a.href=url;
-      a.download='batch_'+batchProjectLabel(selectedBatchTemplate)+'.zip';
+      a.href=URL.createObjectURL(content);
+      a.download=(selectedBatchTemplate==='emp'?'EMP_CE-M_ALTERNATE':'EMPX')+'_'+start.toISOString().slice(0,10)+'_'+end.toISOString().slice(0,10)+'.zip';
+      document.body.appendChild(a);
       a.click();
-      setTimeout(()=>URL.revokeObjectURL(url),30000);
-      showToast('已生成并下载 '+totalGenerated+' 张 '+batchProjectLabel(selectedBatchTemplate)+' ALPHAPNG','success');
+      setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);
+
+      if(progressEl)progressEl.textContent='完成';
+      showToast(`已生成 ${totalGenerated} 张`,'success');
     }catch(err){
       console.error(err);
-      showToast('生成失败: '+err.message,'error');
+      showToast('批量生成失败: '+(err&&err.message?err.message:err),'error');
     }finally{
       templateElements=backup.template;
       presetElements=backup.preset;
       currentTemplateMode=backup.mode;
+      setCanvasSize(backup.width,backup.height);
       selectedType=backup.selectedType;
       selectedIndex=backup.selectedIndex;
-      setCanvasSize(backup.width,backup.height);
-      if(typeof applyTemplateModeUI==='function')applyTemplateModeUI();
       window.__batchExportInProgress=false;
-      markDirty();render();updateObjectList();updateControls();
-      if(overlay)overlay.classList.remove('show');
+      isDirty=true;
+      render();
+      updateObjectList();
       if(runBtn)runBtn.disabled=false;
+      if(overlay)overlay.classList.remove('show');
     }
   };
 
@@ -5183,6 +5337,35 @@ body.preview-fullscreen-open.fullscreen-tools-open .controls-panel.fullscreen-mi
   window.addEventListener('load',syncFullscreenMinimalUi);
 })();
 </script>
+
+<script id="desktop-toolbar-dock-v1">
+(function(){
+  const BREAKPOINT='(min-width:901px)';
+  let originalNext=null;
+  let originalParent=null;
+  function dockDesktopToolbar(){
+    const toolbar=document.querySelector('body > .toolbar, #sidePanel > .toolbar');
+    const side=document.getElementById('sidePanel');
+    const workspace=document.getElementById('workspace');
+    if(!toolbar||!side||!workspace)return;
+    if(!originalParent){ originalParent=workspace.parentNode; originalNext=workspace; }
+    const desktop=window.matchMedia&&window.matchMedia(BREAKPOINT).matches;
+    if(desktop){
+      workspace.classList.remove('layout-bottom');
+      layoutMode='side';
+      if(toolbar.parentNode!==side) side.insertBefore(toolbar,side.firstChild);
+    }else{
+      if(toolbar.parentNode===side && originalParent) originalParent.insertBefore(toolbar,originalNext);
+    }
+    if(typeof scheduleCrossDeviceCanvasPreview==='function') scheduleCrossDeviceCanvasPreview();
+  }
+  window.addEventListener('DOMContentLoaded',dockDesktopToolbar,{once:true});
+  window.addEventListener('resize',dockDesktopToolbar,{passive:true});
+  if(window.visualViewport) window.visualViewport.addEventListener('resize',dockDesktopToolbar,{passive:true});
+  setTimeout(dockDesktopToolbar,0);
+})();
+</script>
+
 </body>
 </html>
 
