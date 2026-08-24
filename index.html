@@ -1553,7 +1553,7 @@ function applyPreferredTextEditSelection(input,el){
   const range=getPreferredTextEditSelection(input,el);
   try{input.setSelectionRange(range.start,range.end);}catch(_){try{input.select();}catch(__){}}
 }
-function focusSelectedTextEditorFromCanvas(){
+function focusSelectedTextEditorFromCanvas(endEvent){
   const tap=__textEditTap;__textEditTap=null;
   if(!tap||tap.moved||selectedType!==tap.type||selectedIndex!==tap.index)return;
   const el=getSelectedElement();
@@ -1562,30 +1562,35 @@ function focusSelectedTextEditorFromCanvas(){
   const row=document.getElementById('textContentRow');
   const panel=document.getElementById('sidePanel');
   if(!input||!row||!panel)return;
+
+  // IMPORTANT FOR iPHONE SAFARI:
+  // focus() must happen synchronously inside the same touchend/click gesture.
+  // Any requestAnimationFrame/setTimeout before focus loses user activation and the keyboard will not open.
   updateControls();
   if(document.body.classList.contains('preview-fullscreen-open')){
     document.body.classList.add('fullscreen-tools-open');
     if(typeof syncFullscreenMinimalUi==='function')syncFullscreenMinimalUi();
   }
-  requestAnimationFrame(()=>{
-    // Mobile-first: scroll the actual controls panel, not the fixed page.
-    try{
-      const targetTop=Math.max(0,row.offsetTop-panel.clientHeight*0.22);
-      panel.scrollTo({top:targetTop,behavior:'smooth'});
-    }catch(_){
-      try{row.scrollIntoView({behavior:'smooth',block:'center'});}catch(__){row.scrollIntoView();}
+
+  // Put the real edit row in view immediately (no animation before focus).
+  try{
+    panel.scrollTop=Math.max(0,row.offsetTop-panel.clientHeight*0.18);
+  }catch(_){}
+
+  if(endEvent&&endEvent.cancelable){
+    try{endEvent.preventDefault();}catch(_){}
+  }
+  try{input.focus({preventScroll:true});}catch(_){try{input.focus();}catch(__){}}
+  applyPreferredTextEditSelection(input,el);
+
+  // After the keyboard has started opening, restore the precise selection and refine the scroll.
+  requestAnimationFrame(()=>applyPreferredTextEditSelection(input,el));
+  setTimeout(()=>applyPreferredTextEditSelection(input,el),45);
+  setTimeout(()=>{
+    try{panel.scrollTo({top:Math.max(0,row.offsetTop-10),behavior:'smooth'});}catch(_){
+      try{row.scrollIntoView({behavior:'smooth',block:'center'});}catch(__){}
     }
-    setTimeout(()=>{
-      try{input.focus({preventScroll:true});}catch(_){input.focus();}
-      applyPreferredTextEditSelection(input,el);
-      // iOS can reset selection once while the keyboard opens, so apply it once more.
-      setTimeout(()=>applyPreferredTextEditSelection(input,el),45);
-      // Re-center after iOS/Android keyboard changes the visual viewport.
-      setTimeout(()=>{
-        try{panel.scrollTo({top:Math.max(0,row.offsetTop-12),behavior:'smooth'});}catch(_){}
-      },90);
-    }, document.body.classList.contains('preview-fullscreen-open')?60:90);
-  });
+  },110);
 }
 function handleStart(e){
 if(e.touches&&e.touches.length>=2){clearLongPressZoom();startAnchorZoom(e);return;}
@@ -1659,7 +1664,7 @@ clearSnapGuides();
 saveState();
 }
 canvas.style.cursor='move';
-focusSelectedTextEditorFromCanvas();
+focusSelectedTextEditorFromCanvas(e);
 }
 function updateTransform(source){
 const el=getSelectedElement();
