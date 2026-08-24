@@ -1494,6 +1494,7 @@ longPressTimer=setTimeout(()=>{
   anchorScaleStartDist=Math.max(18,getDistFromPointToElementCenter(longPressStartPoint,el));
   anchorScaleSaved=false;
   isAnchorScaling=true;
+  __textEditTap=null;
   isDragging=false;
   suppressNextDrag=true;
   document.body.classList.add('anchor-scaling-active');
@@ -1510,12 +1511,57 @@ if(Math.hypot(p.x-longPressStartPoint.x,p.y-longPressStartPoint.y)>LONG_PRESS_MO
   clearLongPressZoom();
 }
 }
+let __textEditTap=null;
+function queueTextEditTap(e,hit){
+  if(!hit||!hit.el||hit.el.type!=='text'){__textEditTap=null;return;}
+  const p=e.touches&&e.touches[0]?e.touches[0]:e;
+  __textEditTap={type:hit.type,index:hit.index,startX:p.clientX,startY:p.clientY,moved:false};
+}
+function trackTextEditTap(e){
+  if(!__textEditTap)return;
+  const p=e.touches&&e.touches[0]?e.touches[0]:e;
+  if(!p)return;
+  if(Math.hypot(p.clientX-__textEditTap.startX,p.clientY-__textEditTap.startY)>9)__textEditTap.moved=true;
+}
+function focusSelectedTextEditorFromCanvas(){
+  const tap=__textEditTap;__textEditTap=null;
+  if(!tap||tap.moved||selectedType!==tap.type||selectedIndex!==tap.index)return;
+  const el=getSelectedElement();
+  if(!el||el.type!=='text')return;
+  const input=document.getElementById('textContentInput');
+  const row=document.getElementById('textContentRow');
+  const panel=document.getElementById('sidePanel');
+  if(!input||!row||!panel)return;
+  updateControls();
+  if(document.body.classList.contains('preview-fullscreen-open')){
+    document.body.classList.add('fullscreen-tools-open');
+    if(typeof syncFullscreenMinimalUi==='function')syncFullscreenMinimalUi();
+  }
+  requestAnimationFrame(()=>{
+    // Mobile-first: scroll the actual controls panel, not the fixed page.
+    try{
+      const targetTop=Math.max(0,row.offsetTop-panel.clientHeight*0.22);
+      panel.scrollTo({top:targetTop,behavior:'smooth'});
+    }catch(_){
+      try{row.scrollIntoView({behavior:'smooth',block:'center'});}catch(__){row.scrollIntoView();}
+    }
+    setTimeout(()=>{
+      try{input.focus({preventScroll:true});}catch(_){input.focus();}
+      try{input.setSelectionRange(0,input.value.length);}catch(_){try{input.select();}catch(__){}}
+      // Re-center after iOS/Android keyboard changes the visual viewport.
+      setTimeout(()=>{
+        try{panel.scrollTo({top:Math.max(0,row.offsetTop-12),behavior:'smooth'});}catch(_){}
+      },90);
+    }, document.body.classList.contains('preview-fullscreen-open')?60:90);
+  });
+}
 function handleStart(e){
 if(e.touches&&e.touches.length>=2){clearLongPressZoom();startAnchorZoom(e);return;}
 if(e.target!==canvas)return;
 if(e.touches&&e.touches.length===1){scheduleLongPressZoom(e);}
 const pos=getPointerPos(e);
 const hit=findTopElementAt(pos);
+queueTextEditTap(e,hit);
 if(hit&&hit.el){
   selectedType=hit.type;
   selectedIndex=hit.index;
@@ -1538,6 +1584,7 @@ if(hit&&hit.el){
   }
   return;
 }
+__textEditTap=null;
 selectedType='';
 selectedIndex=-1;
 isDragging=false;
@@ -1546,6 +1593,7 @@ updateObjectList();
 updateControls();
 }
 function handleMove(e){
+trackTextEditTap(e);
 if(isAnchorScaling){applySingleAnchorScale(e);return;}
 if(e.touches&&e.touches.length>=2){clearLongPressZoom();if(isPinching){applyAnchorZoom(e);return;}if(startAnchorZoom(e))return;}
 if(e.touches&&e.touches.length===1){checkLongPressMove(e);}
@@ -1568,7 +1616,7 @@ updateSnapGuides(snapResult.snappedX,snapResult.snappedY,snapResult.lineX,snapRe
 markDirty();
 scheduleControlsInputsOnly();
 }
-function handleEnd(){
+function handleEnd(e){
 clearLongPressZoom();
 suppressNextDrag=false;
 endSingleAnchorScale();
@@ -1579,6 +1627,7 @@ clearSnapGuides();
 saveState();
 }
 canvas.style.cursor='move';
+focusSelectedTextEditorFromCanvas();
 }
 function updateTransform(source){
 const el=getSelectedElement();
